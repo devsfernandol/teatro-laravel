@@ -117,7 +117,8 @@ class AdminTest extends TestCase
             'titulo' => 'Yerma',
             'sinopsis' => 'Una mujer que desea ser madre en un pueblo que la juzga.',
             'duracion_minutos' => 95,
-            'imagen' => UploadedFile::fake()->createWithContent('shell.php.jpg', '<?php system($_GET["c"]);'),
+            // Texto con extensión de imagen: el tipo se valida por el contenido real.
+            'imagen' => UploadedFile::fake()->createWithContent('portada.jpg', 'esto no es una imagen'),
         ])->assertSessionHasErrors('imagen');
 
         $this->assertSame(0, Obra::count());
