@@ -1,0 +1,17 @@
+# Para servidores que ya tienen Traefik (por ejemplo, Easypanel) en los
+# puertos 80 y 443. El contenedor web se une a la red de Traefik y no
+# publica ningún puerto.
+# Lo activa: ./instalar.sh --dominio teatro.ejemplo.com --red-traefik easypanel
+services:
+  web:
+    ports: !reset []
+    networks:
+      default:
+      traefik:
+        aliases:
+          - ${ALIAS_WEB:-teatro-web}
+
+networks:
+  traefik:
+    name: ${RED_TRAEFIK:-easypanel}
+    external: true

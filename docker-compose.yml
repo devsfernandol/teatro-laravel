@@ -1,0 +1,159 @@
+# Teatro · instalación con Docker Compose.
+#
+#   Demostración local:  docker compose up -d   →  http://localhost:8080
+#   Instalación guiada:  ./instalar.sh  (genera secretos y, si se indica, HTTPS)
+#
+# Todos los valores tienen un valor por defecto que sirve para la demostración.
+# En producción, instalar.sh genera un archivo .env con contraseñas aleatorias.
+#
+# El nombre del proyecto (prefijo de contenedores y volúmenes) se toma de
+# COMPOSE_PROJECT_NAME en .env o, si no está, del nombre de esta carpeta.
+
+x-php: &php
+  image: teatro-app:2.1.0
+  build:
+    context: .
+    target: app
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m
+    - /var/www/html/bootstrap/cache:uid=82,gid=82,mode=0755
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  volumes:
+    - storage:/var/www/html/storage
+    - subidas:/var/www/html/storage/app/public
+  networks: [datos, default]
+  depends_on:
+    db:
+      condition: service_healthy
+  environment: &php-env
+    APP_NAME: ${APP_NAME:-Teatro}
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_URL: ${APP_URL:-http://localhost:8080}
+    APP_KEY: ${APP_KEY:-}
+    APP_TIMEZONE: ${APP_TIMEZONE:-America/Costa_Rica}
+    TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    LOG_CHANNEL: stack
+    LOG_STACK: daily,stderr
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    DB_CONNECTION: mysql
+    DB_HOST: db
+    DB_PORT: "3306"
+    DB_DATABASE: teatro
+    DB_USERNAME: teatro
+    DB_PASSWORD: ${DB_PASSWORD:-teatro-demo-cambiar}
+    SESSION_DRIVER: database
+    SESSION_LIFETIME: "120"
+    SESSION_ENCRYPT: "true"
+    SESSION_COOKIE: teatro_sesion
+    SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-false}
+    SESSION_SAME_SITE: lax
+    CACHE_STORE: database
+    QUEUE_CONNECTION: database
+    HASH_DRIVER: argon2id
+    MAIL_MAILER: ${MAIL_MAILER:-log}
+    MAIL_SCHEME: ${MAIL_SCHEME:-}
+    MAIL_HOST: ${MAIL_HOST:-}
+    MAIL_PORT: ${MAIL_PORT:-587}
+    MAIL_USERNAME: ${MAIL_USERNAME:-}
+    MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+    MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-no-responder@teatro.local}
+    MAIL_FROM_NAME: ${APP_NAME:-Teatro}
+    PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+    PAYPAL_SECRET: ${PAYPAL_SECRET:-}
+    PAYPAL_MODE: ${PAYPAL_MODE:-sandbox}
+    PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
+    TEATRO_MONEDA: ${TEATRO_MONEDA:-USD}
+    TEATRO_RESERVA_MINUTOS: ${TEATRO_RESERVA_MINUTOS:-10}
+    DEMO_DATA: ${DEMO_DATA:-true}
+    ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@teatro.local}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-name-resolve
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=60
+    environment:
+      MYSQL_DATABASE: teatro
+      MYSQL_USER: teatro
+      MYSQL_PASSWORD: ${DB_PASSWORD:-teatro-demo-cambiar}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-teatro-root-demo-cambiar}
+    volumes:
+      - db:/var/lib/mysql
+    networks: [datos]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    <<: *php
+    command: ["app"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/teatro-listo"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+
+  worker:
+    <<: *php
+    command: ["worker"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+  scheduler:
+    <<: *php
+    command: ["scheduler"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+  web:
+    image: teatro-web:2.1.0
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - subidas:/var/www/html/storage/app/public:ro
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8080}:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/up || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db:
+  storage:
+  subidas:
+
+networks:
+  # La base de datos vive en una red interna, sin salida a Internet.
+  datos:
+    internal: true
+  default:
